@@ -1,0 +1,6 @@
+DBHOST = "yourhost"
+DBPORT= "yourport"
+DBUSER = "youruser"
+DBPWD = "yourpwd"
+DATABASE = "yourdb"
+SCHEMA = "lml_import" # unless modified (should check entire sql script!)
