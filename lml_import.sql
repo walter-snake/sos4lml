@@ -83,6 +83,7 @@ DECLARE
   ub_foi text;
   ub_obsprop text;
   ub_offer text;
+  ub_obs text;
 
   -- ids
   offer_id bigint;
@@ -99,6 +100,7 @@ BEGIN
   SELECT uri INTO ub_foi FROM lml_import.uribase WHERE key = 'featureofinterest';
   SELECT uri INTO ub_obsprop FROM lml_import.uribase WHERE key = 'observableproperty';
   SELECT uri INTO ub_offer FROM lml_import.uribase WHERE key = 'offering';
+  SELECT uri INTO ub_obs FROM lml_import.uribase WHERE key = 'observation';
 
   -- get the series id
   SELECT getseriesid INTO series_id FROM lml_import.getseriesid(
@@ -120,7 +122,7 @@ BEGIN
 
   -- insert the observation
   SELECT nextval('sos.observationid_seq'::regclass) INTO obs_id;
-  obs_uri := ub_sensor || publishstatcode || '/' || sensorcode || '/' || mseriesid::text;
+  obs_uri := ub_obs || publishstatcode || '/' || sensorcode || '/' || mseriesid::text;
   INSERT INTO sos.observation(
             observationid, seriesid, phenomenontimestart, phenomenontimeend, 
             resulttime, identifier, codespaceid, deleted, unitid)
@@ -279,7 +281,7 @@ BEGIN
   -- by searching in the view vw_statsenscode these can be lookup up, hopefully fast enough.
 
   -- Omit specific values (the typical nodata values)
-  IF NEW.m_value IN (-9999, -9998, -999, -998) THEN
+  IF NEW.m_value < -900 THEN
     -- Insert into meetreeks, do not publish to sos.
     -- Alternative: RETURN NULL; that would skip it entirely.
     RETURN NEW;
@@ -327,6 +329,7 @@ DECLARE
   ub_foi text;
   ub_obsprop text;
   ub_offer text;
+  ub_obs text;
 
   -- ids
   offer_id bigint;
@@ -343,6 +346,7 @@ BEGIN
   SELECT uri INTO ub_foi FROM lml_import.uribase WHERE key = 'featureofinterest';
   SELECT uri INTO ub_obsprop FROM lml_import.uribase WHERE key = 'observableproperty';
   SELECT uri INTO ub_offer FROM lml_import.uribase WHERE key = 'offering';
+  SELECT uri INTO ub_obs FROM lml_import.uribase WHERE key = 'observation';
 
   -- get the series id
   SELECT getseriesid INTO series_id FROM lml_import.getseriesid(
@@ -363,7 +367,7 @@ BEGIN
     WHERE unit = munit;
 
   -- insert the observation
-  obs_uri := ub_sensor || publishstatcode || '/' || sensorcode || '/' || mseriesid::text;
+  obs_uri := ub_obs || publishstatcode || '/' || sensorcode || '/' || mseriesid::text;
   INSERT INTO sos.observation(
             observationid, seriesid, phenomenontimestart, phenomenontimeend, 
             resulttime, identifier, codespaceid, deleted, unitid)
@@ -414,63 +418,46 @@ $$;
 CREATE FUNCTION updateseries() RETURNS boolean
     LANGUAGE sql
     AS $$
-  WITH newvalues AS
-    (SELECT seriesid, min(n.value) v_min, max(n.value) v_max
-      , min(o.phenomenontimestart) d_min, max(o.phenomenontimeend) d_max
-    FROM sos.observation o
-    JOIN sos.numericvalue n
-      ON o.observationid = n.observationid
-      WHERE n.value NOT IN (-999, -998)
-    GROUP BY o.seriesid
-  )
   UPDATE sos.series s
-  SET firsttimestamp = d_min
-    , lasttimestamp = d_max
-    , firstnumericvalue = v_min
-    , lastnumericvalue = v_max
-  FROM newvalues n
-  WHERE n.seriesid = s.seriesid
+    SET firsttimestamp = u.firsttimestamp
+      , lasttimestamp = u.lasttimestamp
+      , firstnumericvalue = u.firstnumericvalue
+      , lastnumericvalue = u.lastnumericvalue
+    FROM (
+      WITH mm AS
+        (SELECT seriesid
+            , min(o.phenomenontimeend) d_min, max(o.phenomenontimeend) d_max
+          FROM sos.observation o
+          JOIN sos.numericvalue n
+            ON o.observationid = n.observationid
+            WHERE o.deleted = 'F'
+          GROUP BY o.seriesid)
+      SELECT m1.seriesid, firsttimestamp, lasttimestamp
+        , firstnumericvalue, lastnumericvalue
+      FROM (
+        SELECT mm.seriesid, obs.phenomenontimeend as firsttimestamp, value as firstnumericvalue
+        FROM sos.observation obs
+        JOIN mm
+          ON obs.seriesid = mm.seriesid
+            AND obs.phenomenontimeend = mm.d_min
+            AND obs.deleted = 'F'
+        JOIN sos.numericvalue v
+          ON v.observationid = obs.observationid
+      ) m1
+      , (
+        SELECT mm.seriesid, obs.phenomenontimeend as lasttimestamp, value as lastnumericvalue
+        FROM sos.observation obs
+        JOIN mm
+          ON obs.seriesid = mm.seriesid
+            AND obs.phenomenontimeend = mm.d_max
+            AND obs.deleted = 'F'
+        JOIN sos.numericvalue v
+          ON v.observationid = obs.observationid
+      ) m2
+      WHERE m1.seriesid = m2.seriesid
+    ) u
+  WHERE u.seriesid = s.seriesid
   RETURNING true;
-  $$;
-
-
---
--- Name: xml_file_cachedata(); Type: FUNCTION; Schema: lml_import; Owner: -
---
-
-CREATE FUNCTION xml_file_cachedata() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-  IF (NEW.ts_processed is NULL OR NEW.ts_processed < NEW.ts_updated) THEN
-    -- DELETE OLD STUFF
-    DELETE FROM lml_import.meetreeks WHERE xmlfilename = NEW.xmlfilename;
-    
-    -- INSERT NEW
-    INSERT INTO lml_import.meetreeks (xmlfilename, station_id, stationsid, component, meetwaarde, begindatumtijd, einddatumtijd)
-    with xp as
-    (select
-      NEW.xmlfilename
-      , NEW.component
-      , unnest(xpath('/ROWSET/ROW/STAT_NUMMER/text()', NEW.xmldata))::character varying (16) as stationcode
-      , unnest(xpath('/ROWSET/ROW/MWAA_WAARDE/text()', NEW.xmldata))::text::float as meetwaarde
-      , unnest(xpath('/ROWSET/ROW/MWAA_BEGINDATUMTIJD/text()', NEW.xmldata))::character varying (16) as begindatumtijd
-      , unnest(xpath('/ROWSET/ROW/MWAA_EINDDATUMTIJD/text()', NEW.xmldata))::character varying (16) as einddatumtijd
-    )
-    select
-      xmlfilename
-      , lml_import.getstationid(stationcode)
-      , stationcode
-      , component
-      , meetwaarde
-      , lml_import.lml_datetimeparse_tz(begindatumtijd, 'CET') as begindatumtijd
-      , lml_import.lml_datetimeparse_tz(einddatumtijd, 'CET') as einddatumtijd
-    from xp
-    ;
-  NEW.ts_processed = now();
-  END IF;
-  RETURN NEW;
-END;
 $$;
 
 
@@ -583,51 +570,6 @@ ALTER SEQUENCE download_failures_id_seq OWNED BY download_failures.id;
 
 
 --
--- Name: stations_eionet; Type: TABLE; Schema: lml_import; Owner: -; Tablespace: 
---
-
-CREATE TABLE stations_eionet (
-    id bigint NOT NULL,
-    gmlid text,
-    localid text,
-    namespace text,
-    version text,
-    natlstationcode text,
-    name text,
-    municipality text,
-    eustationcode text,
-    activitybegin text,
-    activityend text,
-    pos text,
-    srsname text,
-    altitude double precision,
-    altitudeunit text,
-    areaclassification text,
-    belongsto text,
-    geom public.geometry(PointZ,4326)
-);
-
-
---
--- Name: eionet_stats_id_seq; Type: SEQUENCE; Schema: lml_import; Owner: -
---
-
-CREATE SEQUENCE eionet_stats_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: eionet_stats_id_seq; Type: SEQUENCE OWNED BY; Schema: lml_import; Owner: -
---
-
-ALTER SEQUENCE eionet_stats_id_seq OWNED BY stations_eionet.id;
-
-
---
 -- Name: measurements; Type: TABLE; Schema: lml_import; Owner: -; Tablespace: 
 --
 
@@ -660,42 +602,6 @@ CREATE SEQUENCE measurements_id_seq
 --
 
 ALTER SEQUENCE measurements_id_seq OWNED BY measurements.id;
-
-
---
--- Name: meetreeks; Type: TABLE; Schema: lml_import; Owner: -; Tablespace: 
---
-
-CREATE TABLE meetreeks (
-    id bigint NOT NULL,
-    xmlfilename character varying(128),
-    stationsid text,
-    component text,
-    meetwaarde double precision,
-    begindatumtijd timestamp with time zone,
-    einddatumtijd timestamp with time zone,
-    sos_observationid bigint,
-    station_id bigint
-);
-
-
---
--- Name: meetreeks_id_seq; Type: SEQUENCE; Schema: lml_import; Owner: -
---
-
-CREATE SEQUENCE meetreeks_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: meetreeks_id_seq; Type: SEQUENCE OWNED BY; Schema: lml_import; Owner: -
---
-
-ALTER SEQUENCE meetreeks_id_seq OWNED BY meetreeks.id;
 
 
 --
@@ -761,6 +667,51 @@ CREATE SEQUENCE sensors_id_seq
 --
 
 ALTER SEQUENCE sensors_id_seq OWNED BY sensors.id;
+
+
+--
+-- Name: stations_eionet; Type: TABLE; Schema: lml_import; Owner: -; Tablespace: 
+--
+
+CREATE TABLE stations_eionet (
+    id bigint NOT NULL,
+    gmlid text,
+    localid text,
+    namespace text,
+    version text,
+    natlstationcode text,
+    name text,
+    municipality text,
+    eustationcode text,
+    activitybegin text,
+    activityend text,
+    pos text,
+    srsname text,
+    altitude double precision,
+    altitudeunit text,
+    areaclassification text,
+    belongsto text,
+    geom public.geometry(PointZ,4326)
+);
+
+
+--
+-- Name: stations_eionet_id_seq; Type: SEQUENCE; Schema: lml_import; Owner: -
+--
+
+CREATE SEQUENCE stations_eionet_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: stations_eionet_id_seq; Type: SEQUENCE OWNED BY; Schema: lml_import; Owner: -
+--
+
+ALTER SEQUENCE stations_eionet_id_seq OWNED BY stations_eionet.id;
 
 
 --
@@ -979,13 +930,6 @@ ALTER TABLE ONLY measurements ALTER COLUMN id SET DEFAULT nextval('measurements_
 -- Name: id; Type: DEFAULT; Schema: lml_import; Owner: -
 --
 
-ALTER TABLE ONLY meetreeks ALTER COLUMN id SET DEFAULT nextval('meetreeks_id_seq'::regclass);
-
-
---
--- Name: id; Type: DEFAULT; Schema: lml_import; Owner: -
---
-
 ALTER TABLE ONLY message_log ALTER COLUMN id SET DEFAULT nextval('message_log_id_seq'::regclass);
 
 
@@ -1000,7 +944,7 @@ ALTER TABLE ONLY sensors ALTER COLUMN id SET DEFAULT nextval('sensors_id_seq'::r
 -- Name: id; Type: DEFAULT; Schema: lml_import; Owner: -
 --
 
-ALTER TABLE ONLY stations_eionet ALTER COLUMN id SET DEFAULT nextval('eionet_stats_id_seq'::regclass);
+ALTER TABLE ONLY stations_eionet ALTER COLUMN id SET DEFAULT nextval('stations_eionet_id_seq'::regclass);
 
 
 --
@@ -1068,14 +1012,6 @@ ALTER TABLE ONLY stations_eionet
 
 ALTER TABLE ONLY measurements
     ADD CONSTRAINT measurements_pkey PRIMARY KEY (id);
-
-
---
--- Name: meetreeks_pkey; Type: CONSTRAINT; Schema: lml_import; Owner: -; Tablespace: 
---
-
-ALTER TABLE ONLY meetreeks
-    ADD CONSTRAINT meetreeks_pkey PRIMARY KEY (id);
 
 
 --
@@ -1159,15 +1095,6 @@ CREATE INDEX xml_files_ts_xmlfile_idx ON xml_files USING btree (ts_xmlfile);
 -- Name: delete_unpublish_sos; Type: TRIGGER; Schema: lml_import; Owner: -
 --
 
-CREATE TRIGGER delete_unpublish_sos AFTER DELETE ON meetreeks FOR EACH ROW EXECUTE PROCEDURE unpublish_sos();
-
-ALTER TABLE meetreeks DISABLE TRIGGER delete_unpublish_sos;
-
-
---
--- Name: delete_unpublish_sos; Type: TRIGGER; Schema: lml_import; Owner: -
---
-
 CREATE TRIGGER delete_unpublish_sos AFTER DELETE ON measurements FOR EACH ROW EXECUTE PROCEDURE unpublish_sos();
 
 
@@ -1182,15 +1109,6 @@ CREATE TRIGGER download_failures_insertprotect BEFORE INSERT ON download_failure
 -- Name: insert_publish_sos; Type: TRIGGER; Schema: lml_import; Owner: -
 --
 
-CREATE TRIGGER insert_publish_sos BEFORE INSERT ON meetreeks FOR EACH ROW EXECUTE PROCEDURE publish_sos();
-
-ALTER TABLE meetreeks DISABLE TRIGGER insert_publish_sos;
-
-
---
--- Name: insert_publish_sos; Type: TRIGGER; Schema: lml_import; Owner: -
---
-
 CREATE TRIGGER insert_publish_sos BEFORE INSERT ON measurements FOR EACH ROW EXECUTE PROCEDURE publish_sos();
 
 
@@ -1199,15 +1117,6 @@ CREATE TRIGGER insert_publish_sos BEFORE INSERT ON measurements FOR EACH ROW EXE
 --
 
 CREATE TRIGGER lml_xmlfile_cachedata BEFORE INSERT OR UPDATE ON xml_files FOR EACH ROW EXECUTE PROCEDURE lml_xmlfile_process();
-
-
---
--- Name: xml_file_cachedata; Type: TRIGGER; Schema: lml_import; Owner: -
---
-
-CREATE TRIGGER xml_file_cachedata BEFORE INSERT OR UPDATE ON xml_files FOR EACH ROW EXECUTE PROCEDURE xml_file_cachedata();
-
-ALTER TABLE xml_files DISABLE TRIGGER xml_file_cachedata;
 
 
 --

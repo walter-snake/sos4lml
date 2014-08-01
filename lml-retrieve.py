@@ -141,7 +141,7 @@ def DownloadInsertFiles(files, mytimeout, sleep):
 
 # Update the series table with min/max values
 def UpdateSeries(pgcur):
-  sql = "SELECT UpdateSeries FROM updateseries();"
+  sql = "SELECT updateseries FROM updateseries();"
   cursor.execute(sql)
   return cursor.fetchone()[0]
 
@@ -192,5 +192,6 @@ conn.commit()
 if UpdateSeries(cursor):
   print "Updated metadata successfully."
 
+conn.commit()
 conn.close()
 # The end

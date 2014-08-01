@@ -54,4 +54,6 @@ docs/_build/
 
 # Various
 *config.py
-
+data/
+.DS_Store
+create-dumps.sh
