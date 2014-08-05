@@ -25,6 +25,7 @@ COPY configuration (id, key, configvalue) FROM stdin;
 9	lml.retrieve.timeframe	4
 10	lml.retrieve.retrytimeframe	12
 4	sos.server.authtoken	xxxxxxxx-157c-11e4-965e-10ddb1bd2187
+11	sos.autoremove.deleted	T
 \.
 
 
@@ -32,7 +33,7 @@ COPY configuration (id, key, configvalue) FROM stdin;
 -- Name: configuration_id_seq; Type: SEQUENCE SET; Schema: lml_import; Owner: -
 --
 
-SELECT pg_catalog.setval('configuration_id_seq', 10, true);
+SELECT pg_catalog.setval('configuration_id_seq', 11, true);
 
 
 --

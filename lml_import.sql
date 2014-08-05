@@ -403,9 +403,32 @@ CREATE FUNCTION unpublish_sos() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+  -- Mark observations to delete
   UPDATE sos.observation
   SET deleted = 'T'
   WHERE observationid = OLD.sos_observationid;
+
+  -- The next steps are introduced as a workaround for a bug in the SOS software,
+  -- but can be left in place.
+  IF (SELECT configvalue FROM lml_import.configuration WHERE key = 'sos.autoremove.deleted') = 'T' THEN
+    DELETE FROM sos.numericvalue
+    WHERE observationid IN (
+      SELECT observationid
+      FROM sos.observation
+      WHERE deleted = 'T')
+    ;
+    DELETE FROM sos.observationhasoffering
+    WHERE observationid IN (
+      SELECT observationid
+      FROM sos.observation
+      WHERE deleted = 'T')
+    ;
+    DELETE FROM sos.observation
+    WHERE deleted = 'T'
+    ;
+  END IF;
+  -- end of workaround
+  
   RETURN OLD;
 END;
 $$;
