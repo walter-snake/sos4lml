@@ -56,4 +56,5 @@ docs/_build/
 *config.py
 data/
 .DS_Store
-create-dumps.sh
+pull-filesdata-webserver.sh
+work/
