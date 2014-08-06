@@ -1,0 +1,96 @@
+SOS4LML
+=======
+
+Installation and usage
+----------------------
+Sos4lml consists of 2 python scripts, and a set of database tables and functions.
+
+* Version 1.x matches 52N SOS database, version 4.1.
+* Postgres database version: 9.2, PostGIS 2.1 (I guess any combination of 9.x and 2.x will work, there's nothing exotic in the code).
+* The scripts target sos data in the database schema 'sos'.
+
+The database tables and functions are all in one schema: lml_import. Installation
+consists of loading the database functions in the same database as the sos (52N) database resides, which can be done using the command:
+  psql -f lml_import.sql -d <sosdatabase>
+
+The script does not incorporate any user or privileges information, so the tables, views and functions will be created under the user account with which you connect to the database server.
+
+A stock python will do, although you'll probably have to add the psycopg2 extension. The other needed extensions are usually installed by default. You can just start the script, Python will complain about missing imports, and if everything is in place it won't do anything without a proper database configuration.
+
+Configuration
+-------------
+The configuration of the sensor network and operational tasks is in the database, the database configuration itself must be done in a file. Database config:
+- rename sos_config.py.example to sos_config.py
+- open it in a texteditor and set the appropriate values
+
+Sensor network and tasks configuration is currently only by example:
+- load the configuration data from the lml_import-config-example.dat file:
+  psql -f lml_import-config-example.dat -d <sosdatabase>
+
+With this command a full example configuration is loaded into the lml_import tables. Look at the data and alter values accordingly. This is pretty much self-explaining, except maybe for the station configuration, which I will explain.
+Tables and purposes:
+- configuration: key-value pairs of various parameters
+- stations_eionet: eionet format table of station data, see below
+- sensors: a list of all the sensors (use a code without spaces), the codes are suffixes for the uri identifiers and should match the codes in the file names of the http downloads (one file per component/sensor)
+- units: a list of measurement units
+- statsensunit: combinations of stations, sensors and units (foreign key ids, although the key is not actually set in the database, would be better)
+
+stations_eionet
+A few important notes
+* Null values are not allowed in this table. E.g. a null in the municipality field will prevent data from being inserted.
+* The data that is actually read by the script and functions is in the view vw_stations. If you want to use a differently formatted station table, feel free to do so, but then adjust the view vw_stations to read/translate your custom table.
+* In the vw_stations view the publishstationcode is the code used for the SOS identifiers (appended to the base uri), the stationcode is matched against the stationcode in the XML files (element name: STAT_NUMMER).
+
+Preparation of the SOS database
+-------------------------------
+After the configuration has been made, the SOS server should be prepared to receive data. That is, sensor, featureofinterest, observableproperty, resulttemplate, offering and unit must be present. This is done by executing the lml-prepare.py script, no further options. Just run it once.
+Remove the "deleted observation" in the SOS admin interface.
+
+The script uses the SOS-T interface to upload the neccessary data, and queries the lml_import configuration for which data to upload. One observation will be inserted and deleted, but this is the final step to bring the full configuration into place in the SOS server.
+
+Loading data
+------------
+XML data will be downloaded from the specified location by the lml-retrieve.py python script (it uses the /sos/ output from the LML). The script inserts the raw XML files into the database, which will immediately trigger processing of the data. The entire processing takes place in the database (SQL and plpgsql functions).
+
+For testing purposes the script can always be started from the commandline. By default it will run using the download configuration in the database, but you may overrule the timeframe and retrytimeframe parameters manually.
+
+Usage: lml-retrieve {help} | {[timeframe] [retry-timeframe]}
+  No options  : Uses defaults from database
+  help        : This help text.
+  timeframe   : Number of hours back from now, to retrieve data for. Downloads 
+                may overlap with previous downloads, retrieved data will be 
+                checked for differences (not imported multiple times, only 
+                updated). Must be combined with retry-timeframe.
+  retry-timeframe: Number of hours back from now, to perform retries for 
+                previously failed downloads (only logged failures). The 
+                webserver will be queried a little slower, and a more forgiving
+                time out value is set (+10 sec). Setting this to 0 effectively
+                disables any retries. Must be combined with timeframe.
+
+Keep in mind that setting the timeframe to 1 will probably make you miss all data in summer, due to the CET timestamps of the LML files!
+
+You can simply run the job on the scheduler (Windows) or as a crontab (Linux), without parameters. With regular updates to previously loaded data a good option could be to pick up once a day all the data for a longer period, e.g. use something like:
+lml-retrieve 360 720
+
+This will get the past two weeks of data (the full dataset), to check for any updates, and retry every single failed download from the past month. Regular updates could then be very fast loading only 4 hours back, and retrying for half a day or so. Of course depending on the update characteristics of the source data.
+
+Miscellaneous
+-------------
+Time format
+The LML uses a peculiar time format: all timedata is in CET (+1), regardless whether it is actually CEST (+2) or not. The sos4lml importer has converters to time zone stamped data, and will insert it as UTC (without time zone!) in the SOS database. The lml_import schema deliberately stores the data with the proper time zone set.
+
+Proxy servers
+There's currently no configuration built in to obtain data through a proxy server, should be done (not too difficult).
+
+Downloads and publishing
+They can be turned on or off by simply adjusting the corresponding flags in the sensors and statsensunit tables. Publication can be turned on/off for each individual sensor. This won't remove already published data.
+
+Adaptation
+----------
+Changing the XML parsing is easy, and should be done in the database function:
+lml_import.lml_xmlfile_process() (trigger function)
+
+The best option is to add a new specific function, give it its own name, and change the trigger calling the function:
+lml_xmlfile_cachedata (on lml_import.xml_files)
+
+Of course you can also add a totally different input format. The publication (and removal) of measurement data to the SOS database schema takes place by simply inserting or deleting data in the measurements table. Triggers and function will take care of the job, keeping track of links between the source rows and sos observations.
