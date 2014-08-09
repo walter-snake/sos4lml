@@ -52,6 +52,7 @@ if len(sys.argv) == 2  and sys.argv[1] == 'help':
 #SOSXML = "/sos/"
 #HTTPTIMEOUT = 5
 #RETRYWAIT = 0.05
+#HTTPPROXY = "http://my.proxy.server:port"
 
 # Get the sensors to download
 def GetSensors(pgcur):
@@ -158,6 +159,14 @@ LMLSERVER = GetConfigFromDb(cursor, 'lml.server.httpaddress')
 SOSXML = GetConfigFromDb(cursor, 'lml.server.directory')
 HTTPTIMEOUT = float(GetConfigFromDb(cursor, 'http.timeout'))
 RETRYWAIT = float(GetConfigFromDb(cursor, 'http.retrywait'))
+HTTPPROXY = GetConfigFromDb(cursor, 'http.proxy')
+HTTPSPROXY = GetConfigFromDb(cursor, 'https.proxy')
+
+# Set the proxy
+if HTTPPROXY != None:
+  os.environ['http_proxy'] = HTTPPROXY
+if HTTPSPROXY != None:
+  os.environ['https_proxy'] = HTTPSPROXY
 
 # timeframes from server, or commandline
 if len(sys.argv) == 3:
