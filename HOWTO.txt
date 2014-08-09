@@ -80,7 +80,8 @@ Time format
 The LML uses a peculiar time format: all timedata is in CET (+1), regardless whether it is actually CEST (+2) or not. The sos4lml importer has converters to time zone stamped data, and will insert it as UTC (without time zone!) in the SOS database. The lml_import schema deliberately stores the data with the proper time zone set.
 
 Proxy servers
-There's currently no configuration built in to obtain data through a proxy server, should be done (not too difficult).
+The lml-retrieve script has built in support to add a custom proxy server. The server should be put in the configuration table (hostname:port, e.g. 'localhost:8118'). Leaving it blank (null) disables setting the proxy, in this case the system environment will be picked up. Setting it to '' (an empty string) will rule out the proxy.
+For lml-prepare you'll need to set the proxy on the commandline, if needed. The system environment will be picked up here. Why not from config? Because it is a one time only script, and runs usually within a companies network, picking up data is more likely to go to the outside world and should be able to run on the scheduler.
 
 Downloads and publishing
 They can be turned on or off by simply adjusting the corresponding flags in the sensors and statsensunit tables. Publication can be turned on/off for each individual sensor. This won't remove already published data.
