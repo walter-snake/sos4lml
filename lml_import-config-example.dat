@@ -26,7 +26,7 @@ COPY configuration (id, key, configvalue) FROM stdin;
 10	lml.retrieve.retrytimeframe	12
 4	sos.server.authtoken	xxxxxxxx-157c-11e4-965e-10ddb1bd2187
 11	sos.autoremove.deleted	T
-12	http.proxy	\N
+12	http.proxy	myproxyhost:8118
 \.
 
 
