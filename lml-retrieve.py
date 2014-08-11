@@ -8,7 +8,7 @@
 #                 of changes and should handle the content.
 #author          :Wouter Boasson
 #date            :20140731
-#version         :1.0
+#version         :1.1
 #usage           :python lml-retrieve.py OR lml-retrieve.py [hours] [hours]
 #notes           :Loading data multiple times is harmless when used against
 #                 the lml_import tables and routines (in the database).

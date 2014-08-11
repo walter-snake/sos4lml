@@ -8,7 +8,7 @@
 #                 database configuration in 'sos_config.py'.
 #author          :Wouter Boasson
 #date            :20140731
-#version         :1.0
+#version         :1.1
 #usage           :python lml-prepare.py
 #notes           :Running the script is pretty harmless, the SOS server with
 #                 database constraints prevent duplicates in the database.
