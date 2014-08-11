@@ -151,6 +151,87 @@ $$;
 
 
 --
+-- Name: insertobservation(bigint, text, public.geometry, text, double precision, text, timestamp with time zone, timestamp with time zone, timestamp with time zone); Type: FUNCTION; Schema: lml_import; Owner: -
+--
+
+CREATE FUNCTION insertobservation(mseriesid bigint, publishstatcode text, statgeom public.geometry, sensorcode text, mvalue double precision, munit text, timestart timestamp with time zone, timeend timestamp with time zone, result_time timestamp with time zone) RETURNS bigint
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  -- uri bases
+  ub_sensor text;
+  ub_foi text;
+  ub_obsprop text;
+  ub_offer text;
+  ub_obs text;
+
+  -- ids
+  offer_id bigint;
+  unit_id bigint;
+  series_id bigint;
+  codespace_id bigint;
+
+  -- result: observation id
+  obs_uri text;
+  obs_id bigint;
+BEGIN
+  -- get the various uri-bases
+  SELECT uri INTO ub_sensor FROM lml_import.uribase WHERE key = 'procedure';
+  SELECT uri INTO ub_foi FROM lml_import.uribase WHERE key = 'featureofinterest';
+  SELECT uri INTO ub_obsprop FROM lml_import.uribase WHERE key = 'observableproperty';
+  SELECT uri INTO ub_offer FROM lml_import.uribase WHERE key = 'offering';
+  SELECT uri INTO ub_obs FROM lml_import.uribase WHERE key = 'observation';
+
+  -- get the series id
+  SELECT getseriesid INTO series_id FROM lml_import.getseriesid(
+    ub_foi || publishstatcode
+    , ub_obsprop || sensorcode
+    , ub_sensor || publishstatcode || '/' || sensorcode)
+  ;
+  
+  -- get the offering, codespace id
+  SELECT offeringid INTO offer_id
+    FROM sos.offering
+    WHERE identifier = ub_offer || publishstatcode || '/' || sensorcode;
+  SELECT codespaceid INTO codespace_id
+    FROM sos.codespace
+    WHERE codespace = 'http://www.opengis.net/def/nil/OGC/0/unknown';
+  SELECT unitid INTO unit_id
+    FROM sos.unit
+    WHERE unit = munit;
+
+  -- insert the observation
+  SELECT nextval('sos.observationid_seq'::regclass) INTO obs_id;
+  obs_uri := ub_obs || publishstatcode || '/' || sensorcode || '/' || mseriesid::text;
+  INSERT INTO sos.observation(
+            observationid, seriesid, phenomenontimestart, phenomenontimeend, 
+            resulttime, identifier, codespaceid, deleted, unitid, samplinggeometry)
+    VALUES (obs_id, series_id
+            , timestart::timestamp with time zone AT TIME ZONE 'UTC'
+            , timeend::timestamp with time zone AT TIME ZONE 'UTC'
+            , result_time::timestamp with time zone AT TIME ZONE 'UTC'
+            , obs_uri
+            , codespace_id
+            , 'F'
+            , unit_id
+            , statgeom)
+  ;
+
+  -- insert the measured value
+  INSERT INTO sos.numericvalue (observationid, value)
+    VALUES(obs_id, mvalue);
+
+  -- insert the link to the offering
+  INSERT INTO sos.observationhasoffering (observationid, offeringid)
+    VALUES(obs_id, offer_id);
+
+  -- return observation identification
+  RETURN obs_id;
+END;
+$$;
+
+
+--
 -- Name: lml_datetimeparse_tz(text, text); Type: FUNCTION; Schema: lml_import; Owner: -
 --
 
@@ -288,7 +369,7 @@ BEGIN
   END IF;
 
   -- Get station, sensor, unit  
-  SELECT publishstationcode, m_unit INTO stat
+  SELECT publishstationcode, m_unit, geom INTO stat
   FROM lml_import.vw_statsensunit s
   WHERE s.station_id = NEW.station_id
   AND s.sensorcode = NEW.sensorcode
@@ -303,6 +384,7 @@ BEGIN
     FROM lml_import.insertobservation(
       NEW.id
       , stat.publishstationcode
+      , stat.geom
       , NEW.sensorcode
       , NEW.m_value
       , stat.m_unit
@@ -379,6 +461,86 @@ BEGIN
             , codespace_id
             , 'F'
             , unit_id)
+  ;
+
+  -- insert the measured value
+  INSERT INTO sos.numericvalue (observationid, value)
+    VALUES(obsid, mvalue);
+
+  -- insert the link to the offering
+  INSERT INTO sos.observationhasoffering (observationid, offeringid)
+    VALUES(obsid, offer_id);
+
+  -- return observation identification
+  RETURN obsid;
+END;
+$$;
+
+
+--
+-- Name: restoreobservation(bigint, bigint, text, public.geometry, text, double precision, text, timestamp with time zone, timestamp with time zone, timestamp with time zone); Type: FUNCTION; Schema: lml_import; Owner: -
+--
+
+CREATE FUNCTION restoreobservation(obsid bigint, mseriesid bigint, publishstatcode text, statgeom public.geometry, sensorcode text, mvalue double precision, munit text, timestart timestamp with time zone, timeend timestamp with time zone, result_time timestamp with time zone) RETURNS bigint
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  -- uri bases
+  ub_sensor text;
+  ub_foi text;
+  ub_obsprop text;
+  ub_offer text;
+  ub_obs text;
+
+  -- ids
+  offer_id bigint;
+  unit_id bigint;
+  series_id bigint;
+  codespace_id bigint;
+
+  -- uri ids
+  obs_uri text;
+
+BEGIN
+  -- get the various uri-bases
+  SELECT uri INTO ub_sensor FROM lml_import.uribase WHERE key = 'procedure';
+  SELECT uri INTO ub_foi FROM lml_import.uribase WHERE key = 'featureofinterest';
+  SELECT uri INTO ub_obsprop FROM lml_import.uribase WHERE key = 'observableproperty';
+  SELECT uri INTO ub_offer FROM lml_import.uribase WHERE key = 'offering';
+  SELECT uri INTO ub_obs FROM lml_import.uribase WHERE key = 'observation';
+
+  -- get the series id
+  SELECT getseriesid INTO series_id FROM lml_import.getseriesid(
+    ub_foi || publishstatcode
+    , ub_obsprop || sensorcode
+    , ub_sensor || publishstatcode || '/' || sensorcode)
+  ;
+  
+  -- get the offering, codespace id
+  SELECT offeringid INTO offer_id
+    FROM sos.offering
+    WHERE identifier = ub_offer || publishstatcode || '/' || sensorcode;
+  SELECT codespaceid INTO codespace_id
+    FROM sos.codespace
+    WHERE codespace = 'http://www.opengis.net/def/nil/OGC/0/unknown';
+  SELECT unitid INTO unit_id
+    FROM sos.unit
+    WHERE unit = munit;
+
+  -- insert the observation
+  obs_uri := ub_obs || publishstatcode || '/' || sensorcode || '/' || mseriesid::text;
+  INSERT INTO sos.observation(
+            observationid, seriesid, phenomenontimestart, phenomenontimeend, 
+            resulttime, identifier, codespaceid, deleted, unitid, samplinggeometry)
+    VALUES (obsid, series_id
+            , timestart::timestamp with time zone AT TIME ZONE 'UTC'
+            , timeend::timestamp with time zone AT TIME ZONE 'UTC'
+            , result_time::timestamp with time zone AT TIME ZONE 'UTC'
+            , obs_uri
+            , codespace_id
+            , 'F'
+            , unit_id
+            , statgeom)
   ;
 
   -- insert the measured value
